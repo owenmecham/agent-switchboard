@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- EXAMPLE launchd job: runs the switchboard every 5 minutes on a Mac.
+     1. Replace every /Users/YOU/... path below.
+     2. cp com.example.agent-switchboard.plist ~/Library/LaunchAgents/
+     3. launchctl load ~/Library/LaunchAgents/com.example.agent-switchboard.plist
+     Stop it:  launchctl unload ~/Library/LaunchAgents/com.example.agent-switchboard.plist
+     API keys: keep them in Keychain (see runner/workers/_common.sh), not in this file. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.example.agent-switchboard</string>
+  <key>WorkingDirectory</key><string>/Users/YOU/agent-switchboard/runner</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>-m</string><string>switchboard</string>
+    <string>--queue</string><string>folder</string>
+    <string>--path</string><string>/Users/YOU/Obsidian/MyVault/agent-switchboard</string>
+    <string>--rules</string><string>/Users/YOU/agent-switchboard/routing/rules.yml</string>
+    <string>--log-file</string><string>/Users/YOU/Library/Logs/agent-switchboard.log</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- launchd has a tiny PATH; add where claude/codex/gh live -->
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>StartInterval</key><integer>300</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardErrorPath</key><string>/Users/YOU/Library/Logs/agent-switchboard.err</string>
+</dict>
+</plist>

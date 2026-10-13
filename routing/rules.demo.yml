@@ -1,0 +1,30 @@
+# Used by `make demo` and the tests. Everything goes to the fake echo worker,
+# except "send" (always human) and "review" (tries a broken worker first, then falls back).
+settings:
+  max_tasks_per_run: 10
+  default_timeout_seconds: 30
+  allow_route_hints: true
+  escalate_failures_to_human: true
+  always_needs_human: [send]
+workers:
+  echo:
+    command: runner/workers/echo.sh
+  broken:
+    command: runner/workers/fail.sh
+  mac-thing:
+    command: runner/workers/echo.sh
+    requires: [macos]
+rules:
+  - name: reviews try broken first
+    match:
+      type: review
+    worker: broken
+    fallbacks: [echo]
+  - name: ui needs a mac
+    match:
+      tags_any: [ui]
+    worker: mac-thing
+    fallbacks: [echo]
+  - name: everything else
+    match: {}
+    worker: echo

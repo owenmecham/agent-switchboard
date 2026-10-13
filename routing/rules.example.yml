@@ -1,0 +1,75 @@
+# agent-switchboard routing rules - EXAMPLE. Copy to routing/rules.yml and make it yours.
+# The Grok setup interview (grok-template/setup-skill.md) can write this file with you.
+#
+# How it's read (details in decision-logic.md):
+#   1. Types in settings.always_needs_human never run automatically.
+#   2. Rules are checked top to bottom. The FIRST match wins.
+#   3. Try the rule's worker, then its fallbacks, skipping any that can't run here.
+#   4. Nothing usable, or every worker failed? The task becomes "needs-human".
+
+settings:
+  max_tasks_per_run: 5            # don't chew through the whole queue at once
+  default_timeout_seconds: 1800   # 30 min per worker attempt
+  allow_route_hints: true         # let a task say "route: worker: codex"
+  escalate_failures_to_human: true
+  always_needs_human: [send, merge, purchase, delete]   # never automatic
+
+workers:
+  # Each worker is a shell command. stdout = the result. exit 0 = success.
+  # requires: OS the worker needs. env: env vars that must be set. binary: must be on PATH.
+  grok:
+    command: runner/workers/grok.sh
+    env: [XAI_API_KEY]
+    max_per_run: 5
+  claude-code:
+    command: runner/workers/claude.sh
+    binary: claude
+    max_per_run: 2               # a crude cost cap
+    timeout_seconds: 3600
+  codex:
+    command: runner/workers/codex.sh
+    binary: codex
+    max_per_run: 2
+  antigravity:
+    command: runner/workers/antigravity.sh
+    requires: [macos]
+  cursor-agent:
+    command: runner/workers/cursor-agent.sh
+    binary: cursor-agent
+    enabled: false               # flip to true once you've set it up
+  deepseek:
+    command: runner/workers/deepseek.sh
+    env: [DEEPSEEK_API_KEY]
+    max_per_run: 10
+  echo:
+    command: runner/workers/echo.sh   # fake worker for testing
+
+rules:
+  - name: research goes to grok
+    match:
+      type: [research, summarize, draft]
+    worker: grok
+    fallbacks: [deepseek]
+
+  - name: code review gets a second opinion
+    match:
+      type: review
+    worker: deepseek
+    fallbacks: [grok]
+
+  - name: mac-only or UI work
+    match:
+      tags_any: [mac-only, ui, design]
+    worker: antigravity
+    fallbacks: [claude-code]
+
+  - name: code changes
+    match:
+      type: [code, bugfix, refactor, test]
+    worker: claude-code
+    fallbacks: [codex, cursor-agent]
+
+  - name: anything unclear goes to a person
+    match: {}
+    needs_human: true
+    reason: no rule for this type yet - decide and add one

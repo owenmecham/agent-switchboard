@@ -1,0 +1,30 @@
+# EXAMPLE GitHub Actions runner (no Mac needed). Copy to .github/workflows/switchboard.yml
+# in the repo that holds your task issues. It wakes up when an issue is labeled
+# "switchboard:queued", plus every 30 minutes as a safety net.
+# Secrets: Settings -> Secrets and variables -> Actions (XAI_API_KEY, DEEPSEEK_API_KEY, ...).
+# Only API-based workers (grok, deepseek, cursor cloud) make sense here; mac-only ones are
+# skipped automatically and fall back or go to needs-human.
+name: switchboard
+on:
+  issues:
+    types: [labeled]
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+permissions:
+  issues: write
+  contents: read
+concurrency: switchboard   # only one runner at a time = no double-claims
+jobs:
+  run:
+    if: github.event_name != 'issues' || github.event.label.name == 'switchboard:queued'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run switchboard once
+        working-directory: runner
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: python3 -m switchboard --queue github --repo "${{ github.repository }}" --rules ../routing/rules.yml
