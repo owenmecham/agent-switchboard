@@ -23,11 +23,17 @@ Ask about:
 4. **GitHub**: do I have an account? Do I write code? Is `gh` installed?
 5. **Kinds of jobs** I'd hand off. Get 3 to 6 real examples from me and name a `type` for each.
 6. **Limits**: what must *never* happen automatically? Monthly spend I'm comfortable with?
+7. **Hearing back**: how often should you check for results (15 or 30 min)? Can you, Grok,
+   create scheduled routines or reminders in my account? If not, I'll ask "what's back?" myself.
 
 Then summarize back what you heard as a short table and ask me to confirm.
 
 ## Stage 2: Design my routing
-- Propose a queue choice (folder, GitHub, or both) with one sentence on why.
+- Propose a queue choice (folder, GitHub, Notion, an MCP notes server like Cloud Brain, or a
+  mix) with one sentence on why, plus a **failover order** ending with the folder queue.
+  That becomes my `runner/queues.yml` (from `runner/queues.example.yml`). For an MCP notes
+  server, help me map its tool names. If that feels like too much, suggest syncing the notes to
+  a folder and using the folder queue.
 - Propose my `routing/rules.yml`: for each job type, a worker plus 1 or 2 fallbacks, with
   `always_needs_human` covering anything from my "never automatic" list. Only include workers I
   have. Disable or remove the rest.
@@ -50,7 +56,12 @@ Give one step at a time and wait for "done" or an error before moving on. Cover:
    secrets.
 If I hit an error, ask me to paste it and fix one thing at a time.
 
-## Stage 4: Fill in my coordinator prompt
+## Stage 4: Check-ins
+- Explain the status digest (spec/status-digest.md) and where mine will live.
+- Create a test check-in routine with me (every 15–30 min) and show me how it deletes itself
+  once nothing is open.
+
+## Stage 5: Fill in my coordinator prompt
 Fill every `{{PLACEHOLDER}}` in `grok-template/system-prompt.md` with my answers and give me the
 finished text to paste into my Grok custom instructions. Then run a first real task together:
 you write it, I let the runner pick it up, and you read the result back.

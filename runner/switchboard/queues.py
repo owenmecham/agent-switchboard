@@ -76,6 +76,11 @@ class FolderQueue:
         task.body = task.body.rstrip() + "\n" + taskfile.result_section(status, worker, output, note)
         self.set_status(task, status, worker=worker)
 
+    def write_digest(self, markdown):
+        tmp = self.root / "status.md.tmp"
+        tmp.write_text(markdown, encoding="utf-8")
+        os.replace(tmp, self.root / "status.md")
+
     def release(self, task):
         (self.locks_dir / f"{task.id}.lock").unlink(missing_ok=True)
 
@@ -138,10 +143,32 @@ class GitHubQueue:
     def release(self, task):
         pass
 
+    def write_digest(self, markdown):
+        """One pinned issue labeled 'switchboard:status' whose body is the digest."""
+        raw = self._gh("issue", "list", "--label", self.PREFIX + "status", "--state", "open",
+                       "--json", "number", "--limit", "1")
+        found = json.loads(raw or "[]")
+        if found:
+            self._gh("issue", "edit", str(found[0]["number"]), "--body-file", "-", input_text=markdown)
+        else:
+            self._gh("issue", "create", "--title", "switchboard status", "--label",
+                     self.PREFIX + "status", "--body-file", "-", input_text=markdown)
+
 
 def make_queue(kind, **opts):
+    """Build one queue from a config dict (see runner/queues.example.yml)."""
     if kind == "folder":
         return FolderQueue(opts["path"])
     if kind == "github":
         return GitHubQueue(opts["repo"])
-    raise ValueError(f"unknown queue '{kind}' (try 'folder' or 'github')")
+    if kind == "notion":
+        from .notion_queue import NotionQueue
+        return NotionQueue(opts["database_id"], opts.get("token_name", "NOTION_TOKEN"),
+                           opts.get("properties"), opts.get("status_property_type", "select"),
+                           opts.get("status_page_id"))
+    if kind == "mcp-notes":
+        from .mcp_queue import McpNotesQueue
+        return McpNotesQueue(opts["url"], opts["folder"], opts["tools"], opts.get("token_name"),
+                             opts.get("path_regex", r"[\w.][\w./ \-]*\.md"),
+                             opts.get("status_note_title", "switchboard status"))
+    raise ValueError(f"unknown queue '{kind}' (folder, github, notion, mcp-notes)")

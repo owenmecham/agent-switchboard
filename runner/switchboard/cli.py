@@ -12,7 +12,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import mini_yaml, routing
+from . import digest, mini_yaml, routing
 from .queues import make_queue
 
 log = logging.getLogger("switchboard")
@@ -41,7 +41,7 @@ def run_worker(name, task, rules, timeout):
         tmp.unlink(missing_ok=True)
 
 
-def process_once(queue, rules, dry_run=False, runner_id=None, env=None):
+def process_once(queue, rules, dry_run=False, runner_id=None, env=None, state=None):
     settings = rules.get("settings") or {}
     max_tasks = settings.get("max_tasks_per_run", 5)
     timeout = settings.get("default_timeout_seconds", 1800)
@@ -49,8 +49,12 @@ def process_once(queue, rules, dry_run=False, runner_id=None, env=None):
     used = {}  # worker -> count this run (simple cost/concurrency cap)
     summary = []
 
+    qname = getattr(queue, "name", "queue")
     tasks = queue.list_queued()
-    log.info("found %d queued task(s)", len(tasks))
+    log.info("[%s] found %d queued task(s)", qname, len(tasks))
+    if state is not None and not dry_run:
+        for t in tasks:
+            digest.record(state, qname, t, "queued")
     for task in tasks[:max_tasks]:
         decision = routing.route(task, rules, env)
         # honour per-worker caps
@@ -75,6 +79,8 @@ def process_once(queue, rules, dry_run=False, runner_id=None, env=None):
         try:
             if decision["action"] == "needs-human":
                 queue.write_result(task, "needs-human", "none", "", note=decision["reason"])
+                if state is not None:
+                    digest.record(state, qname, task, "needs-human", note=decision["reason"])
                 log.info("[%s] needs-human: %s", task.id, decision["reason"])
                 summary.append((task.id, "needs-human", decision["reason"]))
                 continue
@@ -93,11 +99,49 @@ def process_once(queue, rules, dry_run=False, runner_id=None, env=None):
             if status == "failed" and settings.get("escalate_failures_to_human", True):
                 status = "needs-human"
             queue.write_result(task, status, worker, out, note)
+            if state is not None:
+                digest.record(state, qname, task, status, worker, note)
             log.info("[%s] %s via %s", task.id, status, worker)
             summary.append((task.id, status, worker))
         finally:
             queue.release(task)
     return summary
+
+
+def run_all(queues, rules, dry_run=False, state_path=None, env=None):
+    """Poll every queue in order (primary first). An unreachable queue is logged and skipped,
+    so if Notion/GitHub is down the folder fallback still gets processed. The digest is then
+    written to every queue that answered."""
+    state = digest.load(state_path) if state_path else {"tasks": {}}
+    summary, reachable = [], []
+    for q in queues:
+        try:
+            summary += process_once(q, rules, dry_run=dry_run, env=env, state=state)
+            reachable.append(q)
+        except Exception as e:  # network down, auth expired, gh not logged in...
+            log.error("[%s] unreachable, skipping this poll: %s", getattr(q, "name", q), e)
+    if not dry_run:
+        text = digest.render(state)
+        for q in reachable:
+            if hasattr(q, "write_digest"):
+                try:
+                    q.write_digest(text)
+                except Exception as e:
+                    log.warning("[%s] could not write digest: %s", q.name, e)
+        if state_path:
+            digest.save(state, state_path)
+    return summary
+
+
+def load_queues(path):
+    cfg = mini_yaml.loads(Path(path).expanduser().read_text(encoding="utf-8"))
+    out = []
+    for q in cfg.get("queues") or []:
+        if q.get("enabled", True) is False:
+            continue
+        opts = {k: v for k, v in q.items() if k not in ("kind", "enabled", "name")}
+        out.append(make_queue(q["kind"], **opts))
+    return out
 
 
 def _now():
@@ -108,7 +152,11 @@ def _now():
 def main(argv=None):
     p = argparse.ArgumentParser(prog="switchboard", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--queue", choices=["folder", "github"], default="folder")
+    p.add_argument("--queue", choices=["folder", "github"], default="folder",
+                   help="single queue (simple). For notion/mcp-notes/failover use --queues")
+    p.add_argument("--queues", help="queue config file with a failover order (runner/queues.example.yml)")
+    p.add_argument("--state", default="~/.agent-switchboard/state.json",
+                   help="local state used to build the status digest")
     p.add_argument("--path", help="folder queue root (e.g. a folder inside your Obsidian vault)")
     p.add_argument("--repo", help="owner/name for the github queue")
     p.add_argument("--rules", default=str(REPO_ROOT / "routing" / "rules.yml"))
@@ -126,9 +174,9 @@ def main(argv=None):
                         format="%(asctime)s %(levelname)s %(message)s")
 
     rules = mini_yaml.loads(Path(a.rules).read_text(encoding="utf-8"))
-    queue = make_queue(a.queue, path=a.path, repo=a.repo)
+    queues = load_queues(a.queues) if a.queues else [make_queue(a.queue, path=a.path, repo=a.repo)]
     while True:
-        for row in process_once(queue, rules, dry_run=a.dry_run):
+        for row in run_all(queues, rules, dry_run=a.dry_run, state_path=a.state):
             print("\t".join(str(x) for x in row))
         if not a.loop:
             return 0

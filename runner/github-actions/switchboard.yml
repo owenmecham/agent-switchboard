@@ -27,4 +27,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-        run: python3 -m switchboard --queue github --repo "${{ github.repository }}" --rules ../routing/rules.yml
+        run: python3 -m switchboard --queue github --repo "${{ github.repository }}" --rules ../routing/rules.yml --state ../.switchboard-state.json
+        # Note: Actions runners are fresh each time, so the digest only covers this run unless
+        # you cache .switchboard-state.json (actions/cache) between runs.

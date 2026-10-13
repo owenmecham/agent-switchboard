@@ -1,0 +1,58 @@
+# EXAMPLE queue config. Copy to runner/queues.yml, edit, and run:
+#   python3 -m switchboard --queues queues.yml --rules ../routing/rules.yml
+#
+# Order = failover order. Every poll the runner checks each queue top to bottom.
+# If one is unreachable (offline, auth expired) it's skipped with an error in the log
+# and the rest still run. Tell Grok the same order: "write to Notion; if that fails,
+# write to the folder". The folder queue works offline, so keep it last as the safety net.
+# No secrets in this file: tokens come from env vars / Keychain by the names given.
+
+queues:
+  - kind: notion
+    database_id: 00000000000000000000000000000000   # from the database URL
+    token_name: NOTION_TOKEN                        # env var or Keychain item
+    status_property_type: select                    # or "status" if you used Notion's Status type
+    status_page_id: null                            # optional page for the digest
+    enabled: false
+
+  - kind: mcp-notes                 # e.g. Cloud Brain or any MCP notes server
+    url: https://notes.example.com/mcp
+    token_name: NOTES_MCP_TOKEN
+    folder: agent-switchboard/tasks
+    status_note_title: switchboard status
+    enabled: false
+    tools:                          # map the 5 operations to YOUR server's tool names/args
+      list:
+        name: list_directory
+        args:
+          path: "{folder}"
+      read:
+        name: read_note
+        args:
+          file_path: "{path}"
+      find_replace:                 # must FAIL when {find} isn't in the note (used for claiming)
+        name: edit_note
+        args:
+          file_path: "{path}"
+          operation: find_replace
+          find: "{find}"
+          replace: "{replace}"
+      append:
+        name: edit_note
+        args:
+          file_path: "{path}"
+          operation: append
+          content: "{content}"
+      write:                        # optional: the status digest note
+        name: write_note
+        args:
+          title: "{title}"
+          folder: agent-switchboard
+          content: "{content}"
+
+  - kind: github
+    repo: you/your-task-repo
+    enabled: false
+
+  - kind: folder                    # offline fallback; an Obsidian vault folder works
+    path: ~/Obsidian/MyVault/agent-switchboard

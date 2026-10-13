@@ -33,8 +33,10 @@ flowchart LR
 2. **A runner** wakes up every few minutes, finds `queued` tasks, checks your
    [routing rules](routing/rules.example.yml), and runs the right **worker**.
 3. **The runner writes the result back** into the same task file (or as a comment on the
-   GitHub issue) and sets the status to `done`, `failed`, or `needs-human`.
-4. **Grok reads the result** next time you ask ("anything back from my tasks?") and tells you.
+   GitHub issue) and sets the status to `done`, `failed`, or `needs-human`. It also updates a
+   one-page **status digest**.
+4. **Grok picks up the result** with a scheduled check-in that reads the digest every
+   15–30 minutes until the task is done, then reports to you and stops checking.
 
 Nothing magic connects the pieces. They pass notes through a shared place. That's the whole trick,
 and it's why you can swap any piece out.
@@ -63,6 +65,8 @@ and one is an email, so it stops for a human. Needs only Python 3.9+.
 | **Routing rules** | A file that says "this kind of task goes to this worker, else that one". |
 | **Fallback** | The next worker to try if the first can't run or fails. |
 | **needs-human** | A status meaning "a person has to look at this". Not an error, a handoff. |
+| **Check-in** | A scheduled Grok routine that looks for results and stops once your tasks are done. |
+| **Status digest** | One note the runner keeps up to date listing open and recently finished tasks. |
 | **Dry run** | Show what *would* happen without changing anything. |
 
 ## Which queue: GitHub or a notes folder?
@@ -75,9 +79,20 @@ and one is an email, so it stops for a human. Needs only Python 3.9+.
 | History / audit | Built in | Whatever your sync keeps |
 | Setup effort | `gh auth login`, a repo, labels | Make a folder |
 
-Lots of people use **both**: code tasks in GitHub, everything else in the vault. Cloud Brain,
-Notion and similar tools fit the same pattern if you write a small adapter (see the
-[queue adapter contract](spec/queue-adapter-contract.md)).
+Lots of people use **both**: code tasks in GitHub, everything else in the vault.
+
+Two more queues come built in:
+
+- **Notion**: a database with `Status` and `Type` properties. The runner talks to the Notion API
+  directly, using a token from env or the Keychain.
+- **MCP notes servers** (Cloud Brain and similar): the runner speaks MCP over HTTP and calls your
+  server's own tools (`list_directory`, `read_note`, `edit_note`...). You map the tool names in
+  config, so it works with servers that name things differently.
+  *Simpler alternative:* if your notes app can sync to a folder on disk, point the **folder** queue
+  at that folder and skip MCP entirely.
+
+All four share one [queue adapter contract](spec/queue-adapter-contract.md). Configure them
+in [`runner/queues.example.yml`](runner/queues.example.yml).
 
 ## Failover
 
@@ -86,14 +101,22 @@ There are two kinds, and they're different:
 - **Worker failover** is built in. Each rule lists fallbacks. If Claude Code isn't installed on
   this machine, or it crashes, the runner tries Codex next. If nothing works, the task goes to
   `needs-human`. Details: [decision-logic.md](routing/decision-logic.md).
-- **Queue failover** is a habit you teach Grok. If Grok can't reach GitHub, it writes the task
-  to the notes folder instead. Run one runner per queue and both get handled. The setup prompt
-  in `grok-template/` includes this instruction.
+- **Queue failover** has two halves. (1) The runner's `queues.yml` lists queues in order,
+  for example Notion, then the folder. Every poll it checks each one. An unreachable queue is
+  logged and skipped, and the rest still run. (2) Grok is told the same order: "write to Notion;
+  if that fails, write to the folder and tell me". Keep the folder queue last. It works offline.
+
+## Check-ins: how Grok hears back
+
+After Grok queues a task, it sets up a **scheduled check-in** (a routine or reminder in Grok)
+every 15–30 minutes. Each check-in reads one small **status digest** that the runner rewrites
+after every poll ([spec](spec/status-digest.md)), reports anything finished, and **deletes
+itself** once nothing it's watching is still open. No digest, no busywork.
 
 ## Safety (please read)
 
-- **No secrets in this repo, ever.** Workers read API keys from environment variables or the
-  macOS Keychain (`runner/workers/_common.sh`). GitHub Actions uses repository secrets.
+- **No secrets in this repo, ever.** Workers and queues read keys from environment variables or the
+  macOS Keychain (`runner/workers/_common.sh`, `runner/switchboard/secrets.py`). GitHub Actions uses repository secrets.
 - **Humans approve anything that leaves the building.** `send`, `merge`, `purchase`, `delete`
   are in `always_needs_human` by default. Code workers should push branches/PRs, never merge.
 - **Workers run real commands on your machine.** Claude Code and Codex can edit files. Point
@@ -107,9 +130,10 @@ There are two kinds, and they're different:
 
 ```
 grok-template/   Prompt that turns Grok into the coordinator + a setup interview
-spec/            Task file format, result format, queue adapter contract
+spec/            Task file format, result format, status digest, queue adapter contract
 routing/         Example rules, demo rules, how decisions are made
-runner/          Sample runner (Python, standard library only), workers, launchd + Actions examples
+runner/          Sample runner (Python, standard library only): folder, GitHub, Notion, MCP-notes queues,
+                 workers, queues.example.yml, launchd + Actions examples
 examples/        Two full walkthroughs (folder queue, GitHub queue) + the demo vault
 tests/           Unit tests for routing and the folder queue round trip
 ```

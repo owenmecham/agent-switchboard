@@ -32,7 +32,9 @@ workers:
     max_per_run: 2
   antigravity:
     command: runner/workers/antigravity.sh
+    binary: agy
     requires: [macos]
+    timeout_seconds: 1800
   cursor-agent:
     command: runner/workers/cursor-agent.sh
     binary: cursor-agent
